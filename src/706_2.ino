@@ -7,7 +7,7 @@
 #include <SoftwareSerial.h>
 #define BLUETOOTH_RX 10 // Serial Data input pin
 #define BLUETOOTH_TX 11 // Serial Data output pin
-
+#define TURN_SATURATE 100
 #define motorDelay 1000
 
 //SoftwareSerial BluetoothSerial(BLUETOOTH_RX, BLUETOOTH_TX);
@@ -24,6 +24,9 @@ const byte right_rear = 48;
 const byte right_front = 49;
 const byte turret = 8;
 int speed_val = 200;
+float K_P = 2.0;
+
+int fireFlag = 0; //
 
 //initialisation class HCSR04 (trig pin , echo pin)
 HCSR04 ultrasonic(4, 5);
@@ -58,10 +61,10 @@ PID rotationPID(&rotateInput, &rotateOutput, &rotateSetpoint, 5, 0.3, 0, DIRECT)
 const byte fanPin = 3;
 
 //Phototransistor Vout Pins
-const byte longRange1 = A8;   //outer left PT
-const byte shortRange1 = A9;  //inner left PT
-const byte shortRange2 = A10; //inner right PT
-const byte longRange2 = A11;  //outer right PT
+const byte longRangeLeft = A8;    //outer left PT
+const byte shortRangeLeft = A9;   //inner left PT
+const byte shortRangeRight = A10; //inner right PT
+const byte longRangeRight = A11;  //outer right PT3
 
 //global timing variables
 unsigned long searchStartTime = 0;
@@ -91,7 +94,7 @@ void setup()
   // BluetoothSerial.begin(115200);
   Serial.begin(9600);
   enable_motors();
-  Serial.println("L1, L2, R1, R2, SONIC, WEIGHTED");
+  // Serial.println("L1, L2, R1, R2, SONIC, WEIGHTED");
   //Set up IR Sensors
   senA.setPowerFitCoeffs(senA_C, senA_P, 0, 1023);
   senB.setPowerFitCoeffs(senB_C, senB_P, 0, 1023);
@@ -172,21 +175,6 @@ STATES locate_fire()
   delay(motorDelay);
 
   return AVOID_OBSTACLE;
-
-  //     int leftLightReading = analogRead(LEFT_LIGHT_SENSOR);
-  //     int rightLightReading = analogRead(RIGHT_LIGHT_SENSOR);
-  //     int leftLightReading2 = analogRead(A9);
-  //     int rightLightReading2 = analogRead(A10);
-
-  // leftLightReading = (leftLightReading + leftLightReading2)/2;
-  // rightLightReading = (rightLightReading + rightLightReading2)/2 ;
-  //     if (rightLightReading < 800 && leftLightReading < 800)
-  //     {
-  //       cw(150);
-  //     }
-
-  //     rightLightReading > leftLightReading ? cw(120) : ccw(120);
-  //     return LOCATE_FIRE;
 }
 
 STATES relocate()
@@ -215,17 +203,17 @@ STATES relocate()
 STATES avoid_obstacle()
 {
 
-  int leftLightReading = analogRead(A8);
-  int rightLightReading = analogRead(A11);
-  int leftLightReading2 = analogRead(A9);
-  int rightLightReading2 = analogRead(A10);
+  int longRangeLeftReading = analogRead(longRangeLeft);
+  int longRangeRightReading = analogRead(longRangeRight);
+  int shortRangeLeftReading = analogRead(shortRangeLeft);
+  int shortRangeRightReading = analogRead(shortRangeRight);
   float sonicReading = ultrasonic.dist();
-  int turnLeftorRight = (rightLightReading * .1 + rightLightReading2 * .2 - leftLightReading * .1 - leftLightReading2 *.2);
+  int controlError = (longRangeRightReading * .3 + shortRangeRightReading - longRangeLeftReading * .3 - shortRangeLeftReading);
 
-  int distFrontLeft = senA.getDist();
-  int distFrontRight = senB.getDist();
-  int distLeft = senC.getDist();
-  int distRight = senD.getDist();
+  // int distFrontLeft = senA.getDist();
+  // int distFrontRight = senB.getDist();
+  // int distLeft = senC.getDist();
+  // int distRight = senD.getDist();
 
   if (sonicReading == 0)
   {
@@ -240,29 +228,45 @@ STATES avoid_obstacle()
   // Serial.print(", ");
   // Serial.print(leftLightReading2);
   // Serial.print(", ");
-  // Serial.print(sonicReading * 10);
+  // Serial.print(sonicReading);
   // Serial.print(", ");
-  // Serial.println(turnLeftorRight);
+
+  // Serial.print(-300);
+  // Serial.print(", ");
+  // Serial.print(300);
+  // Serial.print(", ");
+  // Serial.println(controlError*K_P);
+
+  pivot(200, controlError * K_P);
+
+  if (sonicReading < 10)
+  {
+    cw(0);
+    delay(1000);
+    return EXTUINGISH_FIRE;
+  }
+
+  delay(20);
 
   // forwardAndTurn(100, turnLeftorRight / 2);
 
-  if (sonicReading < 7 && (rightLightReading2 > 200 || leftLightReading2 > 200))
-  {
-    unsigned long settlingTime = millis();
-    while (millis() < settlingTime + 2000)
-    {
-      int leftLightReading = analogRead(A8);
-      int rightLightReading = analogRead(A11);
-      int leftLightReading2 = analogRead(A9);
-      int rightLightReading2 = analogRead(A10);
-      int turnLeftorRight = (rightLightReading * 1 + rightLightReading2 * .5 - leftLightReading * 1 - leftLightReading2 * .5);
+  // if (sonicReading < 7 && (rightLightReading2 > 200 || leftLightReading2 > 200))
+  // {
+  //   unsigned long settlingTime = millis();
+  //   while (millis() < settlingTime + 2000)
+  //   {
+  //     int leftLightReading = analogRead(A8);
+  //     int rightLightReading = analogRead(A11);
+  //     int leftLightReading2 = analogRead(A9);
+  //     int rightLightReading2 = analogRead(A10);
+  //     int turnLeftorRight = (rightLightReading * 1 + rightLightReading2 * .5 - leftLightReading * 1 - leftLightReading2 * .5);
 
-      pivot(0, turnLeftorRight / 3);
-      delay(20);
-    }
+  //     pivot(0, turnLeftorRight / 3);
+  //     delay(20);
+  //   }
 
-    return EXTUINGISH_FIRE;
-  }
+  //   return EXTUINGISH_FIRE;
+  // }
 
   //check sensors values for collision
 
@@ -289,15 +293,15 @@ STATES avoid_obstacle()
   //   }
   // }
 
-  else
-  {
-    pivot(200, turnLeftorRight/2);
-  }
+  // else
+  // {
+  //   pivot(200, turnLeftorRight/2);
+  // }
 
-  if ((strafedCounter > 20 || strafedCounter < -20) && ((lastTimeStrafed + 1000) < millis()))
-  {
-    return LOCATE_FIRE;
-  }
+  // if ((strafedCounter > 20 || strafedCounter < -20) && ((lastTimeStrafed + 1000) < millis()))
+  // {
+  //   return LOCATE_FIRE;
+  // }
 
   return AVOID_OBSTACLE;
 }
@@ -307,11 +311,29 @@ STATES extuingish_fire()
   digitalWrite(fanPin, HIGH);
   delay(10000);
   digitalWrite(fanPin, LOW);
+  fireFlag++;
+  reverse(500); //go in reverse a bit
+  delay(1000);  // wait a second
+  stop();       //stop
+  delay(100);   //wait a bit
+
+  if (fireFlag == 2)
+  {
+
+    return SHUTDOWN;
+  }
+
   return LOCATE_FIRE;
 }
 
 STATES shutdown()
 {
+
+  disable_motors();
+  delay(1000);
+  digitalWrite(13, HIGH); //flash inbuilt LED
+  delay(1000);
+  digitalWrite(13, LOW);
   return SHUTDOWN;
 }
 //////////////////////////////////////////////////////////Relocate to max distance/////////////////////////////////
@@ -483,48 +505,48 @@ void forwardAndTurn(int base_speed, int turnSpeed)
   //   turnSpeed = -200;
   // }
 
-
-  if ( turnSpeed > 0)
+  if (turnSpeed > 0)
   {
 
-  left_font_motor.writeMicroseconds(1500 + base_speed + turnSpeed);
-  left_rear_motor.writeMicroseconds(1500 + base_speed + turnSpeed);
-  right_rear_motor.writeMicroseconds(1500 - base_speed );
-  right_font_motor.writeMicroseconds(1500 - base_speed );
+    left_font_motor.writeMicroseconds(1500 + base_speed + turnSpeed);
+    left_rear_motor.writeMicroseconds(1500 + base_speed + turnSpeed);
+    right_rear_motor.writeMicroseconds(1500 - base_speed);
+    right_font_motor.writeMicroseconds(1500 - base_speed);
   }
 
   else
   {
-  left_font_motor.writeMicroseconds(1500 + base_speed );
-  left_rear_motor.writeMicroseconds(1500 + base_speed );
-  right_rear_motor.writeMicroseconds(1500 - base_speed - abs(turnSpeed));
-  right_font_motor.writeMicroseconds(1500 - base_speed - abs(turnSpeed));
-
-
+    left_font_motor.writeMicroseconds(1500 + base_speed);
+    left_rear_motor.writeMicroseconds(1500 + base_speed);
+    right_rear_motor.writeMicroseconds(1500 - base_speed - abs(turnSpeed));
+    right_font_motor.writeMicroseconds(1500 - base_speed - abs(turnSpeed));
   }
 }
 
 void pivot(int base_speed, int turnSpeed)
 {
 
-  if (turnSpeed > 80)
+  if (turnSpeed > TURN_SATURATE) //Limit turnSpeed to saturation value (hardcoded value)
   {
-    turnSpeed = 80;
+    turnSpeed = TURN_SATURATE;
   }
 
-  else if (turnSpeed < -80)
+  else if (turnSpeed < -TURN_SATURATE) //Limit turnSpeed to saturation value (hardcoded value)
   {
-    turnSpeed = -80;
+    turnSpeed = -TURN_SATURATE;
   }
 
+  base_speed = base_speed - abs(turnSpeed); //if turnspeed is large, base_speed decreases to give time to turn
+
+  if (base_speed < 0) //base speed shouldnt be less than 0 however.
+  {
+    base_speed = 0;
+  }
 
   left_font_motor.writeMicroseconds(1500 + base_speed + turnSpeed);
   left_rear_motor.writeMicroseconds(1500 + base_speed + turnSpeed);
   right_rear_motor.writeMicroseconds(1500 - base_speed + turnSpeed);
   right_font_motor.writeMicroseconds(1500 - base_speed + turnSpeed);
-  
-
-
 }
 
 // void bluetoothOutput(int32_t value1, int32_t value2){
