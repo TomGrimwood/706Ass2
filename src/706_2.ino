@@ -121,7 +121,7 @@ void setup()
   senB.setPowerFitCoeffs(senB_C, senB_P, 0, 1023);
   senC.setPowerFitCoeffs(senC_C, senC_P, 50, 600);
   senD.setPowerFitCoeffs(senD_C, senD_P, 50, 600);
-
+  turret_motor.writeMicroseconds(SENSORS_FRONT);
   // Make sure fan is turned off
   pinMode(fanPin, OUTPUT);
   digitalWrite(fanPin, LOW);
@@ -286,7 +286,7 @@ STATES head_toward_fire()
   if ((IFRLeft < MAX_STRAFE_READING && IFRLeft > MIN_STRAFE_READING) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
   {
     stop();
-    delay(1000);
+    delay(200);
 
     if (recentlyScanned)
     {
@@ -300,7 +300,7 @@ STATES head_toward_fire()
   if ((IFRRight < MAX_STRAFE_READING && IFRRight > MIN_STRAFE_READING) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
   {
     stop();
-    delay(1000);
+    delay(200);
 
 
     if (recentlyScanned)
@@ -685,13 +685,12 @@ void scanTurret()
   leftDistReading = 999;
   rightDistReading = 999;
 
-  turret_motor.writeMicroseconds(SENSORS_FRONT);
-  delay(200);
+
   for (int i = 0; i < SIDE_SCAN_RESOLUTION + 1; i++)
   {
 
     turret_motor.writeMicroseconds(SENSORS_FRONT - (SENSORS_FRONT - SENSORS_BACK) / SIDE_SCAN_RESOLUTION * i);
-    delay(200);
+    delay(150);
     for (int j = 0; j < 4; j++)
     {
       senD.getDist();
@@ -701,7 +700,7 @@ void scanTurret()
 
     int leftDistReadingCurrent = senC.getDist();
     int rightDistReadingCurrent = senD.getDist();
-
+    delay(50);
     if (leftDistReadingCurrent < leftDistReading)
     {
       leftDistReading = leftDistReadingCurrent;
@@ -715,4 +714,5 @@ void scanTurret()
 
   recentlyScanned = 1;
   timeSinceScanned = millis();
+  turret_motor.writeMicroseconds(SENSORS_FRONT);
 }
