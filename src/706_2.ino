@@ -9,14 +9,14 @@
 #define BLUETOOTH_TX 11 // Serial Data output pin
 #define TURN_SATURATE 100
 #define motorDelay 1000
-#define SENSORS_FRONT 2800
-#define SENSORS_BACK 500
-#define SIDE_SCAN_RESOLUTION 6
-#define SIDE_SCAN_MAX 100
-
-
-#define MIN_STRAFE_READING 235
-#define MAX_STRAFE_READING 375
+#define SENSORS_FRONT 2800 //turret microseconds reading to face sensors forward
+#define SENSORS_BACK 500 //turrent ... face sensors backwards
+#define SIDE_SCAN_RESOLUTION 6 //resoulition of scan values to take
+#define SIDE_SCAN_MAX 130  //max scan value that it deems room to move that way
+#define STRAFE_TIME_CONSTANT 650 //constant strafe(200) duration after a side scan
+#define RESCAN_COOLDOWN 1300 //time after a scan that it doesnt scan again
+#define MIN_STRAFE_READING 220 //decrease this number, and it increases the distance between car and obstacle as it drives around it. OBSTACLE GETS CLOSER -> READING GETS HIGHER
+#define MAX_STRAFE_READING 375 //same
 // SoftwareSerial BluetoothSerial(BLUETOOTH_RX, BLUETOOTH_TX);
 
 // Create Servo Objects and define digital output pins for the servo motorrs.
@@ -245,7 +245,7 @@ STATES relocate()
 STATES head_toward_fire()
 {
 
-  if  ( timeSinceScanned + 3000 < millis() )
+  if  ( timeSinceScanned + RESCAN_COOLDOWN < millis() )
   {
     recentlyScanned = 0;
   }
@@ -336,7 +336,7 @@ STATES avoid_obstacle_right()
   else if (leftDistReading < SIDE_SCAN_MAX)
   {
     strafe_right(200);
-    delay(500);
+    delay(STRAFE_TIME_CONSTANT);
     stop();
     return HEAD_TOWARDS_FIRE;
   }
@@ -367,7 +367,7 @@ STATES avoid_obstacle_left()
   else if (rightDistReading < SIDE_SCAN_MAX)
   {
     strafe_left(200);
-    delay(500);
+    delay(STRAFE_TIME_CONSTANT);
     stop();
     return HEAD_TOWARDS_FIRE;
   }
