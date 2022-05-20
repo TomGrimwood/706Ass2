@@ -9,10 +9,23 @@
 #define BLUETOOTH_TX 11 // Serial Data output pin
 #define TURN_SATURATE 100
 #define motorDelay 1000
+#define SENSORS_FRONT 2800
+#define SENSORS_BACK 500
+#define SIDE_SCAN_RESOLUTION 6
+#define SIDE_SCAN_MAX 100
 
-//SoftwareSerial BluetoothSerial(BLUETOOTH_RX, BLUETOOTH_TX);
 
-//Create Servo Objects and define digital output pins for the servo motorrs.
+#define MIN_STRAFE_READING 235
+#define MAX_STRAFE_READING 375
+// SoftwareSerial BluetoothSerial(BLUETOOTH_RX, BLUETOOTH_TX);
+
+// Create Servo Objects and define digital output pins for the servo motorrs.
+bool recentlyScanned = 0;
+double timeSinceScanned = 0;
+
+
+
+
 Servo left_font_motor;
 Servo left_rear_motor;
 Servo right_rear_motor;
@@ -22,17 +35,20 @@ const byte left_front = 46;
 const byte left_rear = 47;
 const byte right_rear = 48;
 const byte right_front = 49;
-const byte turret = 8;
+const byte turret = 33;
 int speed_val = 200;
 float K_P = 2.0;
 
 int fireFlag = 0; //
 
-//initialisation class HCSR04 (trig pin , echo pin)
+int leftDistReading;
+int rightDistReading;
+
+// initialisation class HCSR04 (trig pin , echo pin)
 HCSR04 ultrasonic(4, 5);
 
-//initalisation class for IR Sensors
-//Sen A = front right, Sen B = Front left, Sen C = Rear Left, Sen D = Rear Right
+// initalisation class for IR Sensors
+// Sen A = front right, Sen B = Front left, Sen C = Rear Left, Sen D = Rear Right
 const byte IRmedianFilterWindowSize = 5;
 extern SharpDistSensor senA, senB, senC, senD;
 SharpDistSensor senA(A5, IRmedianFilterWindowSize);
@@ -41,35 +57,35 @@ const float senA_P = -1.285;
 SharpDistSensor senB(A4, IRmedianFilterWindowSize);
 const float senB_C = 110396;
 const float senB_P = -1.128;
-SharpDistSensor senC(A6, IRmedianFilterWindowSize);
+SharpDistSensor senC(A6, 5);
 const float senC_C = 38158;
 const float senC_P = -1.075;
-SharpDistSensor senD(A7, IRmedianFilterWindowSize);
+SharpDistSensor senD(A7, 5);
 const float senD_C = 23764;
 const float senD_P = -0.999;
 
-//set up rotation PID controller and gyro
-//gyro setup
-int gyroPin = A3;              //Gyro is connected to analog pin A11
-float gyroVoltage = 5;         //Gyro is running at 5V
-float gyroSensitivity = .007;  //Our example gyro is 7mV/deg/sec
-float rotationThreshold = 1.5; //Minimum deg/sec to keep track of - helps with gyro drifting
+// set up rotation PID controller and gyro
+// gyro setup
+int gyroPin = A3;              // Gyro is connected to analog pin A11
+float gyroVoltage = 5;         // Gyro is running at 5V
+float gyroSensitivity = .007;  // Our example gyro is 7mV/deg/sec
+float rotationThreshold = 1.5; // Minimum deg/sec to keep track of - helps with gyro drifting
 double rotateSetpoint, rotateInput, rotateOutput;
 PID rotationPID(&rotateInput, &rotateOutput, &rotateSetpoint, 5, 0.3, 0, DIRECT);
 
-//Fan Pin
+// Fan Pin
 const byte fanPin = 3;
 
-//Phototransistor Vout Pins
-const byte longRangeLeft = A8;    //outer left PT
-const byte shortRangeLeft = A9;   //inner left PT
-const byte shortRangeRight = A10; //inner right PT
-const byte longRangeRight = A11;  //outer right PT3
+// Phototransistor Vout Pins
+const byte longRangeLeft = A8;    // outer left PT
+const byte shortRangeLeft = A9;   // inner left PT
+const byte shortRangeRight = A10; // inner right PT
+const byte longRangeRight = A11;  // outer right PT3
 
-//global timing variables
+// global timing variables
 unsigned long searchStartTime = 0;
 
-//number of fires extinguished
+// number of fires extinguished
 int fires = 0;
 
 int strafedCounter = 0;
@@ -78,16 +94,19 @@ int avoid_obstacles_speed = 100;
 #define LEFT_LIGHT_SENSOR A8
 #define RIGHT_LIGHT_SENSOR A11
 
-//set up finite state machine
+// set up finite state machine
 enum STATES
 {
   LOCATE_FIRE,
   RELOCATE,
   HEAD_TOWARDS_FIRE,
   AVOID_OBSTACLE_RIGHT,
+  NO_SCAN_AVOID_OBSTACLE_RIGHT,
+  NO_SCAN_AVOID_OBSTACLE_LEFT,
   AVOID_OBSTACLE_LEFT,
   EXTUINGISH_FIRE,
-  SHUTDOWN
+  SHUTDOWN,
+  DEBUG
 };
 static STATES machine_state = LOCATE_FIRE;
 
@@ -97,15 +116,16 @@ void setup()
   Serial.begin(9600);
   enable_motors();
   // Serial.println("L1, L2, R1, R2, SONIC, WEIGHTED");
-  //Set up IR Sensors
+  // Set up IR Sensors
   senA.setPowerFitCoeffs(senA_C, senA_P, 0, 1023);
   senB.setPowerFitCoeffs(senB_C, senB_P, 0, 1023);
   senC.setPowerFitCoeffs(senC_C, senC_P, 50, 600);
   senD.setPowerFitCoeffs(senD_C, senD_P, 50, 600);
 
-  //Make sure fan is turned off
+  // Make sure fan is turned off
   pinMode(fanPin, OUTPUT);
   digitalWrite(fanPin, LOW);
+  //Serial.println("distLeft,DistRight");
 }
 
 void loop()
@@ -134,12 +154,24 @@ void loop()
     machine_state = avoid_obstacle_right();
     break;
 
+  case NO_SCAN_AVOID_OBSTACLE_LEFT:
+    machine_state = no_scan_avoid_obstacle_left();
+    break;
+
+  case NO_SCAN_AVOID_OBSTACLE_RIGHT:
+    machine_state = no_scan_avoid_obstacle_right();
+    break;
+
   case EXTUINGISH_FIRE:
     machine_state = extuingish_fire();
     break;
 
   case SHUTDOWN:
     machine_state = shutdown();
+    break;
+
+  case DEBUG:
+    machine_state = debug();
     break;
   }
 }
@@ -148,7 +180,7 @@ void loop()
 STATES locate_fire()
 {
 
-  //initialise start search time
+  // initialise start search time
   searchStartTime = millis();
   strafedCounter = 0;
 
@@ -156,7 +188,7 @@ STATES locate_fire()
   {
     cw(speed_val);
 
-    //Relocate Robot if a full turn has been completed and no fire has been found;
+    // Relocate Robot if a full turn has been completed and no fire has been found;
     if (millis() - searchStartTime > 4500)
     {
 
@@ -166,7 +198,7 @@ STATES locate_fire()
     }
   }
 
-  //turn cw if the right long range PT sees more light, else turn left
+  // turn cw if the right long range PT sees more light, else turn left
   if ((analogRead(A11) - analogRead(A8)) > 20)
   {
     while ((analogRead(A11) - analogRead(A8)) > 20)
@@ -198,7 +230,7 @@ STATES relocate()
   delay(motorDelay);
 
   relocationTime = millis();
-  //drive forward for 5 seconds
+  // drive forward for 5 seconds
   while (((millis() - relocationTime) < 2000) && (ultrasonic.dist() > 20))
   {
     forward(speed_val);
@@ -212,6 +244,12 @@ STATES relocate()
 
 STATES head_toward_fire()
 {
+
+  if  ( timeSinceScanned + 3000 < millis() )
+  {
+    recentlyScanned = 0;
+  }
+  
   int longRangeLeftReading = analogRead(longRangeLeft);
   int longRangeRightReading = analogRead(longRangeRight);
   int shortRangeLeftReading = analogRead(shortRangeLeft);
@@ -226,35 +264,51 @@ STATES head_toward_fire()
   int controlError = (longRangeRightReading * .3 + shortRangeRightReading - longRangeLeftReading * .3 - shortRangeLeftReading);
   int speed;
 
+
+
   if (sonicReading == 0)
   {
     sonicReading = 100;
   }
 
-  if ((sonicReading < 20) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100))){
+  if ((sonicReading < 20) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
+  {
     speed = 100;
   }
-  else{
+  else
+  {
     speed = 200;
   }
 
   pivot(speed, controlError * K_P);
 
-  //detect if there is an obstacle to the right. 
-  if ( (IFRLeft < 350 && IFRLeft > 250) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
+  // detect if there is an obstacle to the right.
+  if ((IFRLeft < MAX_STRAFE_READING && IFRLeft > MIN_STRAFE_READING) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
   {
     stop();
     delay(1000);
+
+    if (recentlyScanned)
+    {
+      return NO_SCAN_AVOID_OBSTACLE_RIGHT;
+    }
+    
     return AVOID_OBSTACLE_RIGHT;
   }
 
-  //detect if there is an obstacle to the left. 
-  if ( (IFRRight < 400 && IFRRight > 250) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
-   {
+  // detect if there is an obstacle to the left.
+  if ((IFRRight < MAX_STRAFE_READING && IFRRight > MIN_STRAFE_READING) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
+  {
     stop();
     delay(1000);
-    return AVOID_OBSTACLE_LEFT;
 
+
+    if (recentlyScanned)
+    {
+      return NO_SCAN_AVOID_OBSTACLE_LEFT;
+    }
+
+    return AVOID_OBSTACLE_LEFT;
   }
 
   if (sonicReading < 10 && ((shortRangeLeftReading > 200 || shortRangeRightReading > 200)))
@@ -272,32 +326,98 @@ STATES head_toward_fire()
 STATES avoid_obstacle_right()
 {
 
+  scanTurret();
+
+  if (rightDistReading < SIDE_SCAN_MAX && leftDistReading < SIDE_SCAN_MAX)
+  {
+    return RELOCATE;
+  }
+
+  else if (leftDistReading < SIDE_SCAN_MAX)
+  {
+    strafe_right(200);
+    delay(500);
+    stop();
+    return HEAD_TOWARDS_FIRE;
+  }
+
+  while (analogRead(A4) > MIN_STRAFE_READING)
+
+  {
+
+    strafe_left(200);
+    delay(50);
+  }
+
+  stop();
+  return HEAD_TOWARDS_FIRE;
+}
+
+STATES avoid_obstacle_left()
+{
+
+
+  scanTurret();
+  
+  if (rightDistReading < SIDE_SCAN_MAX && leftDistReading < SIDE_SCAN_MAX)
+  {
+    return RELOCATE;
+  }
+
+  else if (rightDistReading < SIDE_SCAN_MAX)
+  {
+    strafe_left(200);
+    delay(500);
+    stop();
+    return HEAD_TOWARDS_FIRE;
+  }
+
+  while (analogRead(A5) > MIN_STRAFE_READING)
+
+  {
+
+    strafe_right(200);
+    delay(50);
+  }
+
+  stop();
+  return HEAD_TOWARDS_FIRE;
+}
+
+STATES no_scan_avoid_obstacle_right()
+{
+
+  
   int IFRLeft = analogRead(A4);
 
   strafe_left(200);
-  if (IFRLeft < 250)
+  if (IFRLeft < MIN_STRAFE_READING)
   {
     stop();
     return HEAD_TOWARDS_FIRE;
   }
     delay(50);
-  return AVOID_OBSTACLE_RIGHT;
+  return NO_SCAN_AVOID_OBSTACLE_RIGHT;
+
 }
 
-STATES avoid_obstacle_left()
+STATES no_scan_avoid_obstacle_left()
 {
-  int IFRRight = analogRead(A5);
+
+  
+int IFRRight = analogRead(A5);
 
   strafe_right(200);
   if (IFRRight < 250)
   {
-
     stop();
     return HEAD_TOWARDS_FIRE;
   }
-  delay(50);
-  return AVOID_OBSTACLE_LEFT;
+    delay(50);
+  return NO_SCAN_AVOID_OBSTACLE_LEFT;
+
 }
+
 
 STATES extuingish_fire()
 {
@@ -306,11 +426,12 @@ STATES extuingish_fire()
   digitalWrite(fanPin, LOW);
   fireFlag++;
 
-  if(fireFlag < 2){
-    reverse(150); //go in reverse a bit
-    delay(500);  // wait a second
-    stop();       //stop
-    delay(100);   //wait a bit
+  if (fireFlag < 2)
+  {
+    reverse(150); // go in reverse a bit
+    delay(500);   // wait a second
+    stop();       // stop
+    delay(100);   // wait a bit
   }
 
   if (fireFlag == 2)
@@ -326,11 +447,18 @@ STATES shutdown()
 
   disable_motors();
   delay(5000);
-  digitalWrite(13, HIGH); //flash inbuilt LED
+  digitalWrite(13, HIGH); // flash inbuilt LED
   delay(5000);
   digitalWrite(13, LOW);
   return SHUTDOWN;
 }
+
+STATES debug()
+{
+  scanTurret();
+  return DEBUG;
+}
+
 //////////////////////////////////////////////////////////Relocate to max distance/////////////////////////////////
 int findMaxDist(void)
 {
@@ -357,7 +485,7 @@ int findMaxDist(void)
 }
 
 /////////////////////////////////////////////////////////PID Rotate Function///////////////////////////////////////
-//rotates the angle given from the closest wall to face it
+// rotates the angle given from the closest wall to face it
 void rotateController(float rotateAngle)
 {
 
@@ -365,26 +493,26 @@ void rotateController(float rotateAngle)
   rotateSetpoint = currentAngle + rotateAngle;
   float gyroZeroVoltage = analogRead(gyroPin) * 5 / 1023.0;
 
-  //turn the PID on
+  // turn the PID on
   rotationPID.SetSampleTime(10);
   rotationPID.SetOutputLimits(-speed_val, speed_val);
   rotationPID.SetMode(AUTOMATIC);
 
   while (abs(rotateSetpoint - currentAngle) > 10)
   {
-    //This line converts the 0-1023 signal to 0-5V
+    // This line converts the 0-1023 signal to 0-5V
     float gyroRate = (analogRead(gyroPin) * gyroVoltage) / 1023;
 
-    //This line finds the voltage offset from sitting still
+    // This line finds the voltage offset from sitting still
     gyroRate -= gyroZeroVoltage;
 
-    //This line divides the voltage we found by the gyro's sensitivity
+    // This line divides the voltage we found by the gyro's sensitivity
     gyroRate /= gyroSensitivity;
 
-    //Ignore the gyro if our angular velocity does not meet our threshold
+    // Ignore the gyro if our angular velocity does not meet our threshold
     if (gyroRate >= rotationThreshold || gyroRate <= -rotationThreshold)
     {
-      //This line divides the value by 100 since we are running in a 10ms loop (1000ms/10ms)
+      // This line divides the value by 100 since we are running in a 10ms loop (1000ms/10ms)
       gyroRate /= 100;
       currentAngle += gyroRate;
     }
@@ -398,7 +526,7 @@ void rotateController(float rotateAngle)
 }
 
 //----------------------Motor moments------------------------
-//The Vex Motor Controller 29 use Servo Control signals to determine speed and direction, with 0 degrees meaning neutral https://en.wikipedia.org/wiki/Servo_control
+// The Vex Motor Controller 29 use Servo Control signals to determine speed and direction, with 0 degrees meaning neutral https://en.wikipedia.org/wiki/Servo_control
 
 void disable_motors()
 {
@@ -423,7 +551,7 @@ void enable_motors()
   right_font_motor.attach(right_front); // attaches the servo on pin right_front to turn Vex Motor Controller 29 On
   turret_motor.attach(turret);
 }
-void stop() //Stop
+void stop() // Stop
 {
   left_font_motor.writeMicroseconds(1500);
   left_rear_motor.writeMicroseconds(1500);
@@ -521,19 +649,19 @@ void forwardAndTurn(int base_speed, int turnSpeed)
 void pivot(int base_speed, int turnSpeed)
 {
 
-  if (turnSpeed > TURN_SATURATE) //Limit turnSpeed to saturation value (hardcoded value)
+  if (turnSpeed > TURN_SATURATE) // Limit turnSpeed to saturation value (hardcoded value)
   {
     turnSpeed = TURN_SATURATE;
   }
 
-  else if (turnSpeed < -TURN_SATURATE) //Limit turnSpeed to saturation value (hardcoded value)
+  else if (turnSpeed < -TURN_SATURATE) // Limit turnSpeed to saturation value (hardcoded value)
   {
     turnSpeed = -TURN_SATURATE;
   }
 
-  base_speed = base_speed - abs(turnSpeed); //if turnspeed is large, base_speed decreases to give time to turn
+  base_speed = base_speed - abs(turnSpeed); // if turnspeed is large, base_speed decreases to give time to turn
 
-  if (base_speed < 0) //base speed shouldnt be less than 0 however.
+  if (base_speed < 0) // base speed shouldnt be less than 0 however.
   {
     base_speed = 0;
   }
@@ -550,3 +678,41 @@ void pivot(int base_speed, int turnSpeed)
 //   BluetoothSerial.print(Delimiter);
 //   BluetoothSerial.println(value2, DEC);
 // }
+
+void scanTurret()
+
+{
+  leftDistReading = 999;
+  rightDistReading = 999;
+
+  turret_motor.writeMicroseconds(SENSORS_FRONT);
+  delay(200);
+  for (int i = 0; i < SIDE_SCAN_RESOLUTION + 1; i++)
+  {
+
+    turret_motor.writeMicroseconds(SENSORS_FRONT - (SENSORS_FRONT - SENSORS_BACK) / SIDE_SCAN_RESOLUTION * i);
+    delay(200);
+    for (int j = 0; j < 4; j++)
+    {
+      senD.getDist();
+      senC.getDist();
+      delay(30);
+    }
+
+    int leftDistReadingCurrent = senC.getDist();
+    int rightDistReadingCurrent = senD.getDist();
+
+    if (leftDistReadingCurrent < leftDistReading)
+    {
+      leftDistReading = leftDistReadingCurrent;
+    }
+
+    if (rightDistReadingCurrent < rightDistReading)
+    {
+      rightDistReading = rightDistReadingCurrent;
+    }
+  }
+
+  recentlyScanned = 1;
+  timeSinceScanned = millis();
+}
