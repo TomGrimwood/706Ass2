@@ -32,13 +32,13 @@ int fireFlag = 0; //
 HCSR04 ultrasonic(4, 5);
 
 //initalisation class for IR Sensors
-//Sen A = front left, Sen B = Front Right, Sen C = Rear Left, Sen D = Rear Right
-const byte IRmedianFilterWindowSize = 1;
+//Sen A = front right, Sen B = Front left, Sen C = Rear Left, Sen D = Rear Right
+const byte IRmedianFilterWindowSize = 5;
 extern SharpDistSensor senA, senB, senC, senD;
-SharpDistSensor senA(A4, IRmedianFilterWindowSize);
+SharpDistSensor senA(A5, IRmedianFilterWindowSize);
 const float senA_C = 273479.;
 const float senA_P = -1.285;
-SharpDistSensor senB(A5, IRmedianFilterWindowSize);
+SharpDistSensor senB(A4, IRmedianFilterWindowSize);
 const float senB_C = 110396;
 const float senB_P = -1.128;
 SharpDistSensor senC(A6, IRmedianFilterWindowSize);
@@ -83,7 +83,9 @@ enum STATES
 {
   LOCATE_FIRE,
   RELOCATE,
-  AVOID_OBSTACLE,
+  HEAD_TOWARDS_FIRE,
+  AVOID_OBSTACLE_RIGHT,
+  AVOID_OBSTACLE_LEFT,
   EXTUINGISH_FIRE,
   SHUTDOWN
 };
@@ -120,8 +122,16 @@ void loop()
     machine_state = relocate();
     break;
 
-  case AVOID_OBSTACLE:
-    machine_state = avoid_obstacle();
+  case HEAD_TOWARDS_FIRE:
+    machine_state = head_toward_fire();
+    break;
+
+  case AVOID_OBSTACLE_LEFT:
+    machine_state = avoid_obstacle_left();
+    break;
+
+  case AVOID_OBSTACLE_RIGHT:
+    machine_state = avoid_obstacle_right();
     break;
 
   case EXTUINGISH_FIRE:
@@ -174,7 +184,7 @@ STATES locate_fire()
   stop();
   delay(motorDelay);
 
-  return AVOID_OBSTACLE;
+  return HEAD_TOWARDS_FIRE;
 }
 
 STATES relocate()
@@ -189,7 +199,7 @@ STATES relocate()
 
   relocationTime = millis();
   //drive forward for 5 seconds
-  while (((millis() - relocationTime) < 5000) && (ultrasonic.dist() > 20))
+  while (((millis() - relocationTime) < 2000) && (ultrasonic.dist() > 20))
   {
     forward(speed_val);
     delay(75);
@@ -200,110 +210,93 @@ STATES relocate()
   return LOCATE_FIRE;
 }
 
-STATES avoid_obstacle()
+STATES head_toward_fire()
 {
-
   int longRangeLeftReading = analogRead(longRangeLeft);
   int longRangeRightReading = analogRead(longRangeRight);
   int shortRangeLeftReading = analogRead(shortRangeLeft);
   int shortRangeRightReading = analogRead(shortRangeRight);
+
+  int IFRLeft = analogRead(A4);
+  int IFRRight = analogRead(A5);
+  int IFRrearLeft = senC.getDist();
+  int IFRrearRight = senD.getDist();
+
   float sonicReading = ultrasonic.dist();
   int controlError = (longRangeRightReading * .3 + shortRangeRightReading - longRangeLeftReading * .3 - shortRangeLeftReading);
-
-  // int distFrontLeft = senA.getDist();
-  // int distFrontRight = senB.getDist();
-  // int distLeft = senC.getDist();
-  // int distRight = senD.getDist();
+  int speed;
 
   if (sonicReading == 0)
   {
     sonicReading = 100;
   }
 
-  // Serial.print(rightLightReading);
-  // Serial.print(", ");
-  // Serial.print(rightLightReading2);
-  // Serial.print(", ");
-  // Serial.print(leftLightReading);
-  // Serial.print(", ");
-  // Serial.print(leftLightReading2);
-  // Serial.print(", ");
-  // Serial.print(sonicReading);
-  // Serial.print(", ");
+  if ((sonicReading < 20) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100))){
+    speed = 100;
+  }
+  else{
+    speed = 200;
+  }
 
-  // Serial.print(-300);
-  // Serial.print(", ");
-  // Serial.print(300);
-  // Serial.print(", ");
-  // Serial.println(controlError*K_P);
+  pivot(speed, controlError * K_P);
 
-  pivot(200, controlError * K_P);
-
-  if (sonicReading < 10)
+  //detect if there is an obstacle to the right. 
+  if ( (IFRLeft < 350 && IFRLeft > 250) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
   {
-    cw(0);
+    stop();
+    delay(1000);
+    return AVOID_OBSTACLE_RIGHT;
+  }
+
+  //detect if there is an obstacle to the left. 
+  if ( (IFRRight < 400 && IFRRight > 250) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
+   {
+    stop();
+    delay(1000);
+    return AVOID_OBSTACLE_LEFT;
+
+  }
+
+  if (sonicReading < 10 && ((shortRangeLeftReading > 200 || shortRangeRightReading > 200)))
+  {
+    stop();
     delay(1000);
     return EXTUINGISH_FIRE;
   }
 
   delay(20);
 
-  // forwardAndTurn(100, turnLeftorRight / 2);
+  return HEAD_TOWARDS_FIRE;
+}
 
-  // if (sonicReading < 7 && (rightLightReading2 > 200 || leftLightReading2 > 200))
-  // {
-  //   unsigned long settlingTime = millis();
-  //   while (millis() < settlingTime + 2000)
-  //   {
-  //     int leftLightReading = analogRead(A8);
-  //     int rightLightReading = analogRead(A11);
-  //     int leftLightReading2 = analogRead(A9);
-  //     int rightLightReading2 = analogRead(A10);
-  //     int turnLeftorRight = (rightLightReading * 1 + rightLightReading2 * .5 - leftLightReading * 1 - leftLightReading2 * .5);
+STATES avoid_obstacle_right()
+{
 
-  //     pivot(0, turnLeftorRight / 3);
-  //     delay(20);
-  //   }
+  int IFRLeft = analogRead(A4);
 
-  //   return EXTUINGISH_FIRE;
-  // }
+  strafe_left(200);
+  if (IFRLeft < 250)
+  {
+    stop();
+    return HEAD_TOWARDS_FIRE;
+  }
+    delay(50);
+  return AVOID_OBSTACLE_RIGHT;
+}
 
-  //check sensors values for collision
+STATES avoid_obstacle_left()
+{
+  int IFRRight = analogRead(A5);
 
-  // Serial.println(distFrontLeft);
-  // Serial.println(distFrontRight);
-  // Serial.println(distFront);
-  // Serial.println(distLeft);
-  // Serial.println(distRight);
-  // Serial.println("\n\n\n\n\n");
+  strafe_right(200);
+  if (IFRRight < 250)
+  {
 
-  // if (sonicReading < 13 || distFrontRight < 150 || distFrontLeft < 150)
-  // {
-  //   if (((distFrontRight * .8 + distRight * .2) > (distFrontLeft * .8 + distLeft * .2)) || (((distFrontRight * .8 + distRight * .2) > 300) && ((distFrontLeft * .8 + distLeft * .2) > 300)))
-  //   {
-  //     strafe_right(avoid_obstacles_speed);
-  //     strafedCounter++;
-  //     lastTimeStrafed = millis();
-  //   }
-  //   else
-  //   {
-  //     strafe_left(avoid_obstacles_speed);
-  //     strafedCounter--;
-  //     lastTimeStrafed = millis();
-  //   }
-  // }
-
-  // else
-  // {
-  //   pivot(200, turnLeftorRight/2);
-  // }
-
-  // if ((strafedCounter > 20 || strafedCounter < -20) && ((lastTimeStrafed + 1000) < millis()))
-  // {
-  //   return LOCATE_FIRE;
-  // }
-
-  return AVOID_OBSTACLE;
+    stop();
+    return HEAD_TOWARDS_FIRE;
+  }
+  delay(50);
+  return AVOID_OBSTACLE_LEFT;
 }
 
 STATES extuingish_fire()
@@ -312,14 +305,16 @@ STATES extuingish_fire()
   delay(10000);
   digitalWrite(fanPin, LOW);
   fireFlag++;
-  reverse(500); //go in reverse a bit
-  delay(1000);  // wait a second
-  stop();       //stop
-  delay(100);   //wait a bit
+
+  if(fireFlag < 2){
+    reverse(150); //go in reverse a bit
+    delay(500);  // wait a second
+    stop();       //stop
+    delay(100);   //wait a bit
+  }
 
   if (fireFlag == 2)
   {
-
     return SHUTDOWN;
   }
 
@@ -330,9 +325,9 @@ STATES shutdown()
 {
 
   disable_motors();
-  delay(1000);
+  delay(5000);
   digitalWrite(13, HIGH); //flash inbuilt LED
-  delay(1000);
+  delay(5000);
   digitalWrite(13, LOW);
   return SHUTDOWN;
 }
