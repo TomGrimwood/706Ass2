@@ -99,7 +99,7 @@ int avoid_obstacles_speed = 100;
 enum STATES
 {
   LOCATE_FIRE,
-  RELOCATE,
+  //RELOCATE,
   HEAD_TOWARDS_FIRE,
   AVOID_OBSTACLE_RIGHT,
   NO_SCAN_AVOID_OBSTACLE_RIGHT,
@@ -139,9 +139,9 @@ void loop()
     machine_state = locate_fire();
     break;
 
-  case RELOCATE:
-    machine_state = relocate();
-    break;
+  // case RELOCATE:
+  //   machine_state = relocate();
+  //   break;
 
   case HEAD_TOWARDS_FIRE:
     machine_state = head_toward_fire();
@@ -184,8 +184,9 @@ STATES locate_fire()
   // initialise start search time
   searchStartTime = millis();
   strafedCounter = 0;
+  int lightLimit = 300;
+  while ((analogRead(A8) < lightLimit) && (analogRead(A11) < lightLimit))
 
-  while ((analogRead(A8) < 300) && (analogRead(A11) < 300))
   {
     cw(speed_val);
 
@@ -193,9 +194,8 @@ STATES locate_fire()
     if (millis() - searchStartTime > 4500)
     {
 
-      stop();
-      delay(motorDelay);
-      return RELOCATE;
+      lightLimit = lightLimit - 50;
+      searchStartTime = millis();
     }
   }
 
@@ -220,34 +220,34 @@ STATES locate_fire()
   return HEAD_TOWARDS_FIRE;
 }
 
-STATES relocate()
-{
+// STATES relocate()
+// {
 
-  unsigned long relocationTime;
+//   unsigned long relocationTime;
 
-  int maxDistAngle = findMaxDist();
+//   int maxDistAngle = findMaxDist();
 
-  rotateController(maxDistAngle);
-  delay(motorDelay);
+//   rotateController(maxDistAngle);
+//   delay(motorDelay);
 
-  relocationTime = millis();
+//   relocationTime = millis();
 
-  int IFRLeft = analogRead(A4);
-  int IFRRight = analogRead(A5);
+//   int IFRLeft = analogRead(A4);
+//   int IFRRight = analogRead(A5);
 
-  // drive forward for 5 seconds
-  while (((millis() - relocationTime) < 2000) && (ultrasonic.dist() > 20) && !(IFRLeft < MAX_STRAFE_READING && IFRLeft > MIN_STRAFE_READING) && !(IFRRight < MAX_STRAFE_READING && IFRRight > MIN_STRAFE_READING)))
-  {
-    forward(speed_val);
-    IFRLeft = analogRead(A4);
-    IFRRight = analogRead(A5);
-    delay(40);
-  }
-  stop();
-  delay(motorDelay);
+//   // drive forward for 5 seconds
+//   while (((millis() - relocationTime) < 2000) && (ultrasonic.dist() > 20) && !(IFRLeft < MAX_STRAFE_READING && IFRLeft > MIN_STRAFE_READING) && !(IFRRight < MAX_STRAFE_READING && IFRRight > MIN_STRAFE_READING)))
+//   {
+//     forward(speed_val);
+//     IFRLeft = analogRead(A4);
+//     IFRRight = analogRead(A5);
+//     delay(40);
+//   }
+//   stop();
+//   delay(motorDelay);
 
-  return LOCATE_FIRE;
-}
+//   return LOCATE_FIRE;
+// }
 
 STATES head_toward_fire()
 {
@@ -344,12 +344,8 @@ STATES avoid_obstacle_right()
 
   scanTurret();
 
-  if (rightDistReading < SIDE_SCAN_MAX && leftDistReading < SIDE_SCAN_MAX)
-  {
-    return RELOCATE;
-  }
 
-  else if (leftDistReading < SIDE_SCAN_MAX)
+  if (leftDistReading < SIDE_SCAN_MAX)
   {
     strafe_right(200);
     delay(STRAFE_TIME_CONSTANT);
@@ -374,12 +370,7 @@ STATES avoid_obstacle_left()
 
   scanTurret();
 
-  if (rightDistReading < SIDE_SCAN_MAX && leftDistReading < SIDE_SCAN_MAX)
-  {
-    return RELOCATE;
-  }
-
-  else if (rightDistReading < SIDE_SCAN_MAX)
+  if (rightDistReading < SIDE_SCAN_MAX)
   {
     strafe_left(200);
     delay(STRAFE_TIME_CONSTANT);
