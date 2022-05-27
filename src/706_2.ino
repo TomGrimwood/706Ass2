@@ -6,27 +6,26 @@
 #include <MedianFilterLib2.h>
 #include <SoftwareSerial.h>
 
-
 #define BLUETOOTH_RX 10 // Serial Data input pin
 #define BLUETOOTH_TX 11 // Serial Data output pin
 #define TURN_SATURATE 100
 #define motorDelay 1000
-#define SENSORS_FRONT 2800 //turret microseconds reading to face sensors forward
-#define SENSORS_BACK 500 //turrent ... face sensors backwards
-#define SIDE_SCAN_RESOLUTION 6 //resoulition of scan values to take
-#define SIDE_SCAN_MAX 130  //max scan value that it deems room to move that way
-#define STRAFE_TIME_CONSTANT 650 //constant strafe(200) duration after a side scan
-#define RESCAN_COOLDOWN 1300 //time after a scan that it doesnt scan again
-#define MIN_STRAFE_READING 220 //decrease this number, and it increases the distance between car and obstacle as it drives around it. OBSTACLE GETS CLOSER -> READING GETS HIGHER
-#define MAX_STRAFE_READING 375 //same
+#define SENSORS_FRONT 2800       // turret microseconds reading to face sensors forward
+#define SENSORS_BACK 500         // turrent ... face sensors backwards
+#define SIDE_SCAN_RESOLUTION 6   // resoulition of scan values to take
+#define SIDE_SCAN_MAX 130        // max scan value that it deems room to move that way
+#define STRAFE_TIME_CONSTANT 650 // constant strafe(200) duration after a side scan
+#define RESCAN_COOLDOWN 1300     // time after a scan that it doesnt scan again
+#define MIN_STRAFE_READING 220   // decrease this number, and it increases the distance between car and obstacle as it drives around it. OBSTACLE GETS CLOSER -> READING GETS HIGHER
+#define MAX_STRAFE_READING 375   // same
 // SoftwareSerial BluetoothSerial(BLUETOOTH_RX, BLUETOOTH_TX);
 
 // Create Servo Objects and define digital output pins for the servo motorrs.
 bool recentlyScanned = 0;
 double timeSinceScanned = 0;
 
-
-
+double Setpoint, Input, Output;
+PID myPID(&Input, &Output, &Setpoint, 2, 0, 0, DIRECT);
 
 Servo left_font_motor;
 Servo left_rear_motor;
@@ -127,7 +126,7 @@ void setup()
   // Make sure fan is turned off
   pinMode(fanPin, OUTPUT);
   digitalWrite(fanPin, LOW);
-  //Serial.println("distLeft,DistRight");
+  // Serial.println("distLeft,DistRight");
 }
 
 void loop()
@@ -237,8 +236,7 @@ STATES relocate()
   int IFRRight = analogRead(A5);
 
   // drive forward for 5 seconds
-  while ( ( (millis() - relocationTime) < 2000) && //checking if left IFR doesnt see an object, right IFR doesnt see an object, and ultrasonic in not seeing an object close, also doing for 2 seconds.
-          ( (ultrasonic.dist() > 20) || !(IFRLeft < MAX_STRAFE_READING && IFRLeft > MIN_STRAFE_READING) || !(IFRRight < MAX_STRAFE_READING && IFRRight > MIN_STRAFE_READING) )  ) 
+  while (((millis() - relocationTime) < 2000) && (ultrasonic.dist() > 20) && !(IFRLeft < MAX_STRAFE_READING && IFRLeft > MIN_STRAFE_READING) && !(IFRRight < MAX_STRAFE_READING && IFRRight > MIN_STRAFE_READING)))
   {
     forward(speed_val);
     IFRLeft = analogRead(A4);
@@ -253,83 +251,92 @@ STATES relocate()
 
 STATES head_toward_fire()
 {
+  Setpoint = 0;
+  myPID.SetMode(AUTOMATIC);
+  myPID.SetOutputLimits(-150,150);
+  myPID.SetSampleTime(40);
+  myPID.SetTunings(2, 0, 0);
 
-  if  ( timeSinceScanned + RESCAN_COOLDOWN < millis() )
+  while (1)
   {
-    recentlyScanned = 0;
-  }
-  
-  int longRangeLeftReading = analogRead(longRangeLeft);
-  int longRangeRightReading = analogRead(longRangeRight);
-  int shortRangeLeftReading = analogRead(shortRangeLeft);
-  int shortRangeRightReading = analogRead(shortRangeRight);
 
-  int IFRLeft = analogRead(A4);
-  int IFRRight = analogRead(A5);
-  int IFRrearLeft = senC.getDist();
-  int IFRrearRight = senD.getDist();
-
-  float sonicReading = ultrasonic.dist();
-  int controlError = (longRangeRightReading * .3 + .5 * shortRangeRightReading - longRangeLeftReading * .3 -  .5 * shortRangeLeftReading);
-  int speed;
-
-
-
-  if (sonicReading == 0)
-  {
-    sonicReading = 100;
-  }
-
-  if ((sonicReading < 20) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100))) //if sonicReading less than 20cm,  and short range sensors are somthing..
-  {
-    speed = 100;
-  }
-  else
-  {
-    speed = 200;
-  }
-
-  pivot(speed, controlError * K_P); //P controller which tried to always head towards a light. 
-
-  // detect if there is an obstacle to the right.
-  if ((IFRLeft < MAX_STRAFE_READING && IFRLeft > MIN_STRAFE_READING) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
-  {
-    stop();
-    delay(200);
-
-    if (recentlyScanned)
+    if (timeSinceScanned + RESCAN_COOLDOWN < millis())
     {
-      return NO_SCAN_AVOID_OBSTACLE_RIGHT;
-    }
-    
-    return AVOID_OBSTACLE_RIGHT;
-  }
-
-  // detect if there is an obstacle to the left.
-  if ((IFRRight < MAX_STRAFE_READING && IFRRight > MIN_STRAFE_READING) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
-  {
-    stop();
-    delay(200);
-
-
-    if (recentlyScanned)
-    {
-      return NO_SCAN_AVOID_OBSTACLE_LEFT;
+      recentlyScanned = 0;
     }
 
-    return AVOID_OBSTACLE_LEFT;
+    int longRangeLeftReading = analogRead(longRangeLeft);
+    int longRangeRightReading = analogRead(longRangeRight);
+    int shortRangeLeftReading = analogRead(shortRangeLeft);
+    int shortRangeRightReading = analogRead(shortRangeRight);
+
+    int IFRLeft = analogRead(A4);
+    int IFRRight = analogRead(A5);
+    int IFRrearLeft = senC.getDist();
+    int IFRrearRight = senD.getDist();
+
+    float sonicReading = ultrasonic.dist();
+    int controlError = (longRangeRightReading * .3 + 1 * shortRangeRightReading - longRangeLeftReading * .3 - 1 * shortRangeLeftReading);
+    int speed;
+    Input = -controlError;
+
+    if (sonicReading == 0)
+    {
+      sonicReading = 100;
+    }
+
+    if ((sonicReading < 20) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100))) // if sonicReading less than 20cm,  and short range sensors are somthing..
+    {
+      speed = 100;
+    }
+    else
+    {
+      speed = 200;
+    }
+
+    myPID.Compute();
+    pivot(speed, Output); // P controller which tried to always head towards a light.
+
+    // detect if there is an obstacle to the right.
+    if ((IFRLeft < MAX_STRAFE_READING && IFRLeft > MIN_STRAFE_READING) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
+    {
+      stop();
+      delay(200);
+
+      if (recentlyScanned)
+      {
+        return NO_SCAN_AVOID_OBSTACLE_RIGHT;
+      }
+
+      return AVOID_OBSTACLE_RIGHT;
+    }
+
+    // detect if there is an obstacle to the left.
+    if ((IFRRight < MAX_STRAFE_READING && IFRRight > MIN_STRAFE_READING) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
+    {
+      stop();
+      delay(200);
+
+      if (recentlyScanned)
+      {
+        return NO_SCAN_AVOID_OBSTACLE_LEFT;
+      }
+
+      return AVOID_OBSTACLE_LEFT;
+    }
+
+    if (sonicReading < 10 && ((shortRangeLeftReading > 200 || shortRangeRightReading > 200)))
+    {
+      myPID.SetMode(MANUAL);
+      stop();
+      delay(500);
+      return EXTUINGISH_FIRE;
+    }
+
+    delay(20);
+
+    return HEAD_TOWARDS_FIRE;
   }
-
-  if (sonicReading < 10 && ((shortRangeLeftReading > 200 || shortRangeRightReading > 200)))
-  {
-    stop();
-    delay(500);
-    return EXTUINGISH_FIRE;
-  }
-
-  delay(20);
-
-  return HEAD_TOWARDS_FIRE;
 }
 
 STATES avoid_obstacle_right()
@@ -365,9 +372,8 @@ STATES avoid_obstacle_right()
 STATES avoid_obstacle_left()
 {
 
-
   scanTurret();
-  
+
   if (rightDistReading < SIDE_SCAN_MAX && leftDistReading < SIDE_SCAN_MAX)
   {
     return RELOCATE;
@@ -396,7 +402,6 @@ STATES avoid_obstacle_left()
 STATES no_scan_avoid_obstacle_right()
 {
 
-  
   int IFRLeft = analogRead(A4);
 
   strafe_left(200);
@@ -405,16 +410,14 @@ STATES no_scan_avoid_obstacle_right()
     stop();
     return HEAD_TOWARDS_FIRE;
   }
-    delay(50);
+  delay(50);
   return NO_SCAN_AVOID_OBSTACLE_RIGHT;
-
 }
 
 STATES no_scan_avoid_obstacle_left()
 {
 
-  
-int IFRRight = analogRead(A5);
+  int IFRRight = analogRead(A5);
 
   strafe_right(200);
   if (IFRRight < 250)
@@ -422,27 +425,37 @@ int IFRRight = analogRead(A5);
     stop();
     return HEAD_TOWARDS_FIRE;
   }
-    delay(50);
+  delay(50);
   return NO_SCAN_AVOID_OBSTACLE_LEFT;
-
 }
-
 
 STATES extuingish_fire()
 {
-
+  myPID.SetMode(AUTOMATIC);
   int shortRangeLeftReading = analogRead(shortRangeLeft);
   int shortRangeRightReading = analogRead(shortRangeRight);
+  int longRangeLeftReading = analogRead(longRangeLeft);
+  int longRangeRightReading = analogRead(longRangeRight);
 
+  myPID.SetTunings(.2, .1, .1);
   digitalWrite(fanPin, HIGH);
-  while (shortRangeLeftReading > 200 || shortRangeRightReading > 200) //while shortrange sensors see a fire infront
-    {
-        int controlError = (.3 * shortRangeRightReading - .3 * shortRangeLeftReading);
-        pivot(0, controlError);
-        shortRangeLeftReading = analogRead(shortRangeLeft);
-        shortRangeRightReading = analogRead(shortRangeRight);
-    }
-  digitalWrite(fanPin, LOW); //fire not anymore detected -> move on.
+  myPID.SetSampleTime(5);
+  while (longRangeLeftReading > 800 || longRangeRightReading > 800) // while shortrange sensors see a fire infront
+  {
+
+    int controlError = ( shortRangeRightReading -  shortRangeLeftReading);
+    Input =  -controlError;
+    
+    myPID.Compute();
+    // if abs(Output) < 
+    pivot(0, Output);
+    shortRangeLeftReading = analogRead(shortRangeLeft);
+    shortRangeRightReading = analogRead(shortRangeRight);
+    longRangeLeftReading = analogRead(longRangeLeft);
+    longRangeRightReading = analogRead(longRangeRight);
+  }
+  myPID.SetMode(MANUAL);
+  digitalWrite(fanPin, LOW); // fire not anymore detected -> move on.
   fireFlag++;
 
   if (fireFlag < 2)
@@ -696,7 +709,6 @@ void scanTurret()
 {
   leftDistReading = 999;
   rightDistReading = 999;
-
 
   for (int i = 0; i < SIDE_SCAN_RESOLUTION + 1; i++)
   {
