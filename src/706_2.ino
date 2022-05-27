@@ -16,7 +16,7 @@
 #define SIDE_SCAN_MAX 130        // max scan value that it deems room to move that way
 #define STRAFE_TIME_CONSTANT 650 // constant strafe(200) duration after a side scan
 #define RESCAN_COOLDOWN 1300     // time after a scan that it doesnt scan again
-#define MIN_STRAFE_READING 220   // decrease this number, and it increases the distance between car and obstacle as it drives around it. OBSTACLE GETS CLOSER -> READING GETS HIGHER
+#define MIN_STRAFE_READING 240   // decrease this number, and it increases the distance between car and obstacle as it drives around it. OBSTACLE GETS CLOSER -> READING GETS HIGHER
 #define MAX_STRAFE_READING 375   // same
 // SoftwareSerial BluetoothSerial(BLUETOOTH_RX, BLUETOOTH_TX);
 
@@ -372,8 +372,12 @@ STATES avoid_obstacle_left()
 
   if (rightDistReading < SIDE_SCAN_MAX)
   {
+
+    turret_motor.writeMicroseconds(1600);
+    while(rightDistReading < SIDE_SCAN_MAX && leftDistReading < SIDE_SCAN_MAX)
+    
     strafe_left(200);
-    delay(STRAFE_TIME_CONSTANT);
+    delay(STRAFE_TIME_CONSTANT*1.2);
     stop();
     return HEAD_TOWARDS_FIRE;
   }
