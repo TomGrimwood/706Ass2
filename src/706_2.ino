@@ -5,6 +5,8 @@
 #include <SharpDistSensor.h>
 #include <MedianFilterLib2.h>
 #include <SoftwareSerial.h>
+
+
 #define BLUETOOTH_RX 10 // Serial Data input pin
 #define BLUETOOTH_TX 11 // Serial Data output pin
 #define TURN_SATURATE 100
@@ -230,11 +232,18 @@ STATES relocate()
   delay(motorDelay);
 
   relocationTime = millis();
+
+  int IFRLeft = analogRead(A4);
+  int IFRRight = analogRead(A5);
+
   // drive forward for 5 seconds
-  while (((millis() - relocationTime) < 2000) && (ultrasonic.dist() > 20))
+  while ( ( (millis() - relocationTime) < 2000) && //checking if left IFR doesnt see an object, right IFR doesnt see an object, and ultrasonic in not seeing an object close, also doing for 2 seconds.
+          ( (ultrasonic.dist() > 20) || !(IFRLeft < MAX_STRAFE_READING && IFRLeft > MIN_STRAFE_READING) || !(IFRRight < MAX_STRAFE_READING && IFRRight > MIN_STRAFE_READING) )  ) 
   {
     forward(speed_val);
-    delay(75);
+    IFRLeft = analogRead(A4);
+    IFRRight = analogRead(A5);
+    delay(40);
   }
   stop();
   delay(motorDelay);
@@ -261,7 +270,7 @@ STATES head_toward_fire()
   int IFRrearRight = senD.getDist();
 
   float sonicReading = ultrasonic.dist();
-  int controlError = (longRangeRightReading * .3 + shortRangeRightReading - longRangeLeftReading * .3 - shortRangeLeftReading);
+  int controlError = (longRangeRightReading * .3 + .5 * shortRangeRightReading - longRangeLeftReading * .3 -  .5 * shortRangeLeftReading);
   int speed;
 
 
@@ -271,7 +280,7 @@ STATES head_toward_fire()
     sonicReading = 100;
   }
 
-  if ((sonicReading < 20) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
+  if ((sonicReading < 20) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100))) //if sonicReading less than 20cm,  and short range sensors are somthing..
   {
     speed = 100;
   }
@@ -280,7 +289,7 @@ STATES head_toward_fire()
     speed = 200;
   }
 
-  pivot(speed, controlError * K_P);
+  pivot(speed, controlError * K_P); //P controller which tried to always head towards a light. 
 
   // detect if there is an obstacle to the right.
   if ((IFRLeft < MAX_STRAFE_READING && IFRLeft > MIN_STRAFE_READING) && ((shortRangeRightReading < 100) && (shortRangeLeftReading < 100)))
@@ -314,7 +323,7 @@ STATES head_toward_fire()
   if (sonicReading < 10 && ((shortRangeLeftReading > 200 || shortRangeRightReading > 200)))
   {
     stop();
-    delay(1000);
+    delay(500);
     return EXTUINGISH_FIRE;
   }
 
@@ -421,9 +430,19 @@ int IFRRight = analogRead(A5);
 
 STATES extuingish_fire()
 {
+
+  int shortRangeLeftReading = analogRead(shortRangeLeft);
+  int shortRangeRightReading = analogRead(shortRangeRight);
+
   digitalWrite(fanPin, HIGH);
-  delay(10000);
-  digitalWrite(fanPin, LOW);
+  while (shortRangeLeftReading > 200 || shortRangeRightReading > 200) //while shortrange sensors see a fire infront
+    {
+        int controlError = (.3 * shortRangeRightReading - .3 * shortRangeLeftReading);
+        pivot(0, controlError);
+        shortRangeLeftReading = analogRead(shortRangeLeft);
+        shortRangeRightReading = analogRead(shortRangeRight);
+    }
+  digitalWrite(fanPin, LOW); //fire not anymore detected -> move on.
   fireFlag++;
 
   if (fireFlag < 2)
@@ -671,13 +690,6 @@ void pivot(int base_speed, int turnSpeed)
   right_rear_motor.writeMicroseconds(1500 - base_speed + turnSpeed);
   right_font_motor.writeMicroseconds(1500 - base_speed + turnSpeed);
 }
-
-// void bluetoothOutput(int32_t value1, int32_t value2){
-//   String Delimiter = ", ";
-//   BluetoothSerial.print(value1, DEC);
-//   BluetoothSerial.print(Delimiter);
-//   BluetoothSerial.println(value2, DEC);
-// }
 
 void scanTurret()
 
